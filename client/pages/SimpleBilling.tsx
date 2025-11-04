@@ -36,6 +36,7 @@ import PaymentSection from "@/components/InvoiceCreation/PaymentSection";
 import QuickBillPage from "@/components/InvoiceCreation/QuickBillPage";
 import CustomerDetailsModal from "@/components/CustomerDetailsModal";
 import PasswordProtection from "@/components/PasswordProtection";
+import { calculateBillTotal as calculateBillTotalGST } from "@/utils/gstCalculator";
 
 export default function SimpleBilling() {
   const { bills, isLoading, deleteBill, fetchBills, addBill, updateBill, refreshBills } = useBilling();
@@ -353,6 +354,7 @@ export default function SimpleBilling() {
 
   // Helper function to calculate correct total amount for display
   const calculateBillTotal = (bill: any) => {
+    return calculateBillTotalGST(bill, companyInfo);
     // Always prefer backend stored totalAmount if available
     if (bill && typeof bill.totalAmount === 'number') {
       return bill.totalAmount;
