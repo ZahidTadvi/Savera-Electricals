@@ -35,6 +35,7 @@ import PasswordProtection from '@/components/PasswordProtection';
 import { pdfGenerator, InvoiceData } from '@/utils/pdfGenerator';
 import { buildBillTemplateHTML, generatePDFBlobFromHTML } from '@/utils/billTemplatePDF';
 import { useCompany } from '@/contexts/CompanyContext';
+import { calculateBillTotal as calculateBillTotalGST } from '@/utils/gstCalculator';
 
 interface CustomerDetailsModalProps {
   isOpen: boolean;
@@ -104,71 +105,7 @@ export default function CustomerDetailsModal({
 
   // Helper function to calculate correct total amount for display
   const calculateBillTotal = (bill: any) => {
-    if (!bill || !bill.items || !Array.isArray(bill.items)) {
-      return bill?.totalAmount || 0;
-    }
-
-    const subtotal = bill.items.reduce((sum: number, item: any) => {
-      const quantity = item.itemQuantity || item.quantity || 1;
-      const price = item.itemPrice || item.price || 0;
-      return sum + (quantity * price);
-    }, 0);
-
-    // Get dynamic GST percentage based on customer state and company settings
-    const getGSTPercentage = (state: string) => {
-      // First check if company has custom state rates
-      if (companyInfo?.states && companyInfo.states.length > 0) {
-        const normalizedCustomerState = state.toLowerCase().trim();
-        const matchingState = companyInfo.states.find(state => 
-          state.name.toLowerCase().trim() === normalizedCustomerState
-        );
-        
-        if (matchingState) {
-          console.log('🔍 Using custom state GST rate:', matchingState.gstRate, 'for state:', state);
-          return matchingState.gstRate;
-        }
-      }
-
-      // Fallback to predefined state rates
-      const stateGSTRates: { [key: string]: number } = {
-        'maharashtra': 10,
-        'gujarat': 9,
-        'karnataka': 9,
-        'tamil nadu': 9,
-        'west bengal': 9,
-        'uttar pradesh': 9,
-        'rajasthan': 9,
-        'madhya pradesh': 9,
-        'andhra pradesh': 9,
-        'telangana': 9,
-        'kerala': 9,
-        'punjab': 9,
-        'haryana': 9,
-        'delhi': 9,
-        'default': companyInfo?.defaultGstRate || 18
-      };
-      
-      const normalizedState = state.toLowerCase().trim();
-      const gstRate = stateGSTRates[normalizedState] || stateGSTRates['default'];
-      console.log('🔍 Using predefined GST rate:', gstRate, 'for state:', state);
-      return gstRate;
-    };
-    
-    const billCustomerState = bill.customerState || bill.state || customerState || 'N/A';
-    const gstPercent = getGSTPercentage(billCustomerState);
-    const gstAmount = subtotal * (gstPercent / 100);
-    const totalAmount = subtotal + gstAmount;
-
-    console.log('🔍 calculateBillTotal for bill:', bill.id, {
-      subtotal,
-      gstPercent,
-      gstAmount,
-      totalAmount,
-      customerState: bill.customerState || bill.state || customerState || 'N/A',
-      companyState: companyInfo?.address?.state
-    });
-
-    return Math.round(totalAmount * 100) / 100;
+    return calculateBillTotalGST(bill, companyInfo);
   };
 
   // Calculate dynamic GST based on state settings (same logic as BillPreviewPage)
@@ -269,8 +206,16 @@ export default function CustomerDetailsModal({
       const stats = {
         totalBills: bills.length,
         totalAmount: bills.reduce((sum, bill) => sum + calculateBillTotal(bill), 0),
-        paidAmount: bills.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0),
-        pendingAmount: bills.reduce((sum, bill) => sum + (calculateBillTotal(bill) - (bill.paidAmount || 0)), 0),
+        paidAmount: bills.reduce((sum, bill) => {
+          const total = calculateBillTotal(bill);
+          const paid = Math.min(bill.paidAmount || 0, total);
+          return sum + paid;
+        }, 0),
+        pendingAmount: bills.reduce((sum, bill) => {
+          const total = calculateBillTotal(bill);
+          const paid = Math.min(bill.paidAmount || 0, total);
+          return sum + Math.max(0, total - paid);
+        }, 0),
         lastPurchase: bills.length > 0 ? bills[0].createdAt : null
       };
       
@@ -389,7 +334,8 @@ export default function CustomerDetailsModal({
   const getStatusBadge = (bill: CustomerBill) => {
     // Always calculate status based on remaining amount - this is the source of truth
     const calculatedTotal = calculateBillTotal(bill);
-    const calculatedRemainingAmount = calculatedTotal - (bill.paidAmount || 0);
+    const paid = Math.min(bill.paidAmount || 0, calculatedTotal);
+    const calculatedRemainingAmount = Math.max(0, calculatedTotal - paid);
     const isCompleted = calculatedRemainingAmount <= 0;
     const isPending = calculatedRemainingAmount > 0;
     
@@ -421,7 +367,8 @@ export default function CustomerDetailsModal({
   const getStatusIcon = (bill: CustomerBill) => {
     // Always calculate status based on remaining amount - this is the source of truth
     const calculatedTotal = calculateBillTotal(bill);
-    const calculatedRemainingAmount = calculatedTotal - (bill.paidAmount || 0);
+    const paid = Math.min(bill.paidAmount || 0, calculatedTotal);
+    const calculatedRemainingAmount = Math.max(0, calculatedTotal - paid);
     const isCompleted = calculatedRemainingAmount <= 0;
     const isPending = calculatedRemainingAmount > 0;
     
@@ -871,11 +818,15 @@ export default function CustomerDetailsModal({
   };
 
   const pendingBills = customerBills.filter(bill => {
-    const calculatedRemainingAmount = calculateBillTotal(bill) - (bill.paidAmount || 0);
+    const total = calculateBillTotal(bill);
+    const paid = Math.min(bill.paidAmount || 0, total);
+    const calculatedRemainingAmount = Math.max(0, total - paid);
     return calculatedRemainingAmount > 0;
   });
   const paidBills = customerBills.filter(bill => {
-    const calculatedRemainingAmount = calculateBillTotal(bill) - (bill.paidAmount || 0);
+    const total = calculateBillTotal(bill);
+    const paid = Math.min(bill.paidAmount || 0, total);
+    const calculatedRemainingAmount = Math.max(0, total - paid);
     return calculatedRemainingAmount <= 0;
   });
   const draftBills = customerBills.filter(bill => bill.status === 'draft');

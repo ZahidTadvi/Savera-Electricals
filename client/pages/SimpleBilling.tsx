@@ -36,6 +36,7 @@ import PaymentSection from "@/components/InvoiceCreation/PaymentSection";
 import QuickBillPage from "@/components/InvoiceCreation/QuickBillPage";
 import CustomerDetailsModal from "@/components/CustomerDetailsModal";
 import PasswordProtection from "@/components/PasswordProtection";
+import { calculateBillTotal as calculateBillTotalGST } from "@/utils/gstCalculator";
 
 export default function SimpleBilling() {
   const { bills, isLoading, deleteBill, fetchBills, addBill, updateBill, refreshBills } = useBilling();
@@ -348,59 +349,7 @@ export default function SimpleBilling() {
 
   // Helper function to calculate correct total amount for display
   const calculateBillTotal = (bill: any) => {
-    if (!bill || !bill.items || !Array.isArray(bill.items)) {
-      return bill?.totalAmount || 0;
-    }
-
-    const subtotal = bill.items.reduce((sum: number, item: any) => {
-      const quantity = item.itemQuantity || item.quantity || 1;
-      const price = item.itemPrice || item.price || 0;
-      return sum + (quantity * price);
-    }, 0);
-
-    // Get dynamic GST percentage based on customer state and company settings
-    const getGSTPercentage = (state: string) => {
-      // First check if company has custom state rates
-      if (companyInfo?.states && companyInfo.states.length > 0) {
-        const normalizedCustomerState = state.toLowerCase().trim();
-        const matchingState = companyInfo.states.find(state => 
-          state.name.toLowerCase().trim() === normalizedCustomerState
-        );
-        
-        if (matchingState) {
-          return matchingState.gstRate;
-        }
-      }
-
-      // Fallback to predefined state rates
-      const stateGSTRates: { [key: string]: number } = {
-        'maharashtra': 10,
-        'gujarat': 9,
-        'karnataka': 9,
-        'tamil nadu': 9,
-        'west bengal': 9,
-        'uttar pradesh': 9,
-        'rajasthan': 9,
-        'madhya pradesh': 9,
-        'andhra pradesh': 9,
-        'telangana': 9,
-        'kerala': 9,
-        'punjab': 9,
-        'haryana': 9,
-        'delhi': 9,
-        'default': companyInfo?.defaultGstRate || 18
-      };
-      
-      const normalizedState = state.toLowerCase().trim();
-      return stateGSTRates[normalizedState] || stateGSTRates['default'];
-    };
-    
-    const customerState = bill.customerState || bill.state || 'N/A';
-    const gstPercent = getGSTPercentage(customerState);
-    const gstAmount = subtotal * (gstPercent / 100);
-    const totalAmount = subtotal + gstAmount;
-
-    return Math.round(totalAmount * 100) / 100;
+    return calculateBillTotalGST(bill, companyInfo);
   };
 
   // Helper function to calculate totals (similar to BillingHistory)

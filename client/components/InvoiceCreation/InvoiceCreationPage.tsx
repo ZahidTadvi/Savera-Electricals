@@ -54,6 +54,35 @@ export default function InvoiceCreationPage({ customerName, customerData, onBack
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
   const [isAddingProduct, setIsAddingProduct] = useState(false);
 
+  // Quantity input ephemeral values to allow clearing to empty while typing
+  const [quantityInputValues, setQuantityInputValues] = useState<Record<string, string>>({});
+
+  const handleQuantityInputChange = (itemId: string, value: string) => {
+    // Allow empty while typing
+    if (value === "") {
+      setQuantityInputValues(prev => ({ ...prev, [itemId]: "" }));
+      return;
+    }
+    // Only allow positive integers
+    const num = parseInt(value, 10);
+    if (isNaN(num)) return;
+    if (num < 1) return;
+    setQuantityInputValues(prev => ({ ...prev, [itemId]: value }));
+    updateItemQuantity(itemId, num);
+  };
+
+  const handleQuantityBlur = (itemId: string) => {
+    // If left empty, reset to 1
+    if (quantityInputValues[itemId] === "") {
+      updateItemQuantity(itemId, 1);
+    }
+    setQuantityInputValues(prev => {
+      const copy = { ...prev };
+      delete copy[itemId];
+      return copy;
+    });
+  };
+
   // Function declarations (moved up to avoid hoisting issues)
   const updateItemQuantity = (itemId: string, quantity: number) => {
     console.log('🔄 updateItemQuantity called:', { itemId, quantity, currentItems: items });
@@ -1018,11 +1047,12 @@ export default function InvoiceCreationPage({ customerName, customerData, onBack
                                 >
                                   -
                                 </Button>
-                                <Input
+                                <input
                                   type="number"
                                   min="1"
-                                  value={item.quantity}
-                                  onChange={(e) => updateItemQuantity(item.id, parseInt(e.target.value) || 1)}
+                                  value={quantityInputValues[item.id] !== undefined ? quantityInputValues[item.id] : String(item.quantity)}
+                                  onChange={(e) => handleQuantityInputChange(item.id, e.target.value)}
+                                  onBlur={() => handleQuantityBlur(item.id)}
                                   onFocus={(e) => e.target.select()}
                                   className="h-8 w-16 text-center"
                                 />
@@ -1419,11 +1449,12 @@ export default function InvoiceCreationPage({ customerName, customerData, onBack
                               >
                                 -
                               </Button>
-                              <Input
+                              <input
                                 type="number"
                                 min="1"
-                                value={item.quantity}
-                                onChange={(e) => updateItemQuantity(item.id, parseInt(e.target.value) || 1)}
+                                value={quantityInputValues[item.id] !== undefined ? quantityInputValues[item.id] : String(item.quantity)}
+                                onChange={(e) => handleQuantityInputChange(item.id, e.target.value)}
+                                onBlur={() => handleQuantityBlur(item.id)}
                                 onFocus={(e) => e.target.select()}
                                 className="h-6 w-12 text-center text-xs"
                               />
