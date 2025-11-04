@@ -281,28 +281,33 @@ export default function SimpleBilling() {
       // Reset dropdown states to prevent conflicts
       setDropdownStates({});
 
-      if (bill.status === "draft") {
-        // For drafts, just show a message that draft editing is not available
-        toast({ title: "Error", description: "Draft editing functionality has been removed.", variant: "destructive" });
-      } else {
-        // For completed bills, open edit modal
-        // Recalculate totals to ensure correct values
-        const customerState = bill.customerState || bill.state || 'N/A';
-        const totals = calculateTotals(bill.items || [], customerState);
-        const updatedBill = {
-          ...bill,
-          ...totals,
-          remainingAmount: bill.paymentType === "Partial" 
-            ? (totals.totalAmount - (bill.paidAmount || 0))
-            : 0
-        };
-        
-        setEditingBill(updatedBill);
-        setShowEditModal(true);
-        setShowBillViewModal(false); // Close view modal if open
+      // Open modal immediately with safe defaults
+      setEditingBill({
+        ...bill,
+        items: Array.isArray(bill.items) ? bill.items : [],
+        paymentType: bill.paymentType || "Full",
+      });
+      setShowEditModal(true);
+      setShowBillViewModal(false);
 
-        toast({ title: "Success", description: `Editing bill ${bill.billNumber || bill.id}`, variant: "default" });
-      }
+      // Then compute totals asynchronously; if it fails, keep modal open
+      setTimeout(() => {
+        try {
+          const customerState = bill.customerState || bill.state || 'N/A';
+          const totals = calculateTotals(bill.items || [], customerState);
+          setEditingBill(prev => prev ? {
+            ...prev,
+            ...totals,
+            remainingAmount: prev.paymentType === "Partial" 
+              ? Math.max(0, totals.totalAmount - (prev.paidAmount || 0))
+              : (prev.remainingAmount ?? 0)
+          } : prev);
+        } catch (e) {
+          console.error('Edit totals compute failed:', e);
+        }
+      }, 0);
+
+      toast({ title: "Success", description: `Editing bill ${bill.billNumber || bill.id}`, variant: "default" });
     } catch (error) {
       console.error("Error editing bill:", error);
       toast({ title: "Error", description: "Failed to edit bill", variant: "destructive" });
@@ -350,11 +355,69 @@ export default function SimpleBilling() {
   // Helper function to calculate correct total amount for display
   const calculateBillTotal = (bill: any) => {
     return calculateBillTotalGST(bill, companyInfo);
+    // Always prefer backend stored totalAmount if available
+    if (bill && typeof bill.totalAmount === 'number') {
+      return bill.totalAmount;
+    }
+    if (!bill || !bill.items || !Array.isArray(bill.items)) {
+      return 0;
+    }
+
+    const subtotal = bill.items.reduce((sum: number, item: any) => {
+      const quantity = item.itemQuantity || item.quantity || 1;
+      const price = item.itemPrice || item.price || 0;
+      return sum + (quantity * price);
+    }, 0);
+
+    // Get dynamic GST percentage based on customer state and company settings
+    const getGSTPercentage = (state: string) => {
+      // First check if company has custom state rates
+      if (companyInfo?.states && companyInfo.states.length > 0) {
+        const normalizedCustomerState = state.toLowerCase().trim();
+        const matchingState = companyInfo.states.find(state => 
+          state.name.toLowerCase().trim() === normalizedCustomerState
+        );
+        
+        if (matchingState) {
+          return matchingState.gstRate;
+        }
+      }
+
+      // Fallback to predefined state rates
+      const stateGSTRates: { [key: string]: number } = {
+        'maharashtra': 10,
+        'gujarat': 9,
+        'karnataka': 9,
+        'tamil nadu': 9,
+        'west bengal': 9,
+        'uttar pradesh': 9,
+        'rajasthan': 9,
+        'madhya pradesh': 9,
+        'andhra pradesh': 9,
+        'telangana': 9,
+        'kerala': 9,
+        'punjab': 9,
+        'haryana': 9,
+        'delhi': 9,
+        'default': companyInfo?.defaultGstRate || 18
+      };
+      
+      const normalizedState = state.toLowerCase().trim();
+      return stateGSTRates[normalizedState] || stateGSTRates['default'];
+    };
+    
+    const customerState = bill.customerState || bill.state || 'N/A';
+    const gstPercent = getGSTPercentage(customerState);
+    const gstAmount = subtotal * (gstPercent / 100);
+    const totalAmount = subtotal + gstAmount;
+
+    return Math.round(totalAmount * 100) / 100;
   };
 
   // Helper function to calculate totals (similar to BillingHistory)
   const calculateTotals = (items: any[], customerState?: string) => {
-    const subtotal = items.reduce((sum, item) => {
+    // Gross = entered prices (GST-inclusive)
+    const grossTotal = items.reduce((sum, item) => {
       const quantity = item.itemQuantity || item.quantity || 1;
       const price = item.itemPrice || item.price || 0;
       return sum + (quantity * price);
@@ -398,16 +461,14 @@ export default function SimpleBilling() {
     };
     
     const gstPercent = getGSTPercentage(customerState || 'N/A');
-    
-    // Since the entered price is the total amount including GST,
-    // we need to calculate the base amount and GST amount by reverse calculation
-    const baseAmount = totalAmount / (1 + gstPercent / 100);
-    const gstAmount = totalAmount - baseAmount;
+    // Reverse-calc base and GST from gross
+    const baseAmount = grossTotal / (1 + gstPercent / 100);
+    const gstAmount = grossTotal - baseAmount;
 
     return {
       subtotal: Math.round(baseAmount * 100) / 100,
       gstAmount: Math.round(gstAmount * 100) / 100,
-      totalAmount: Math.round(totalAmount * 100) / 100,
+      totalAmount: Math.round(grossTotal * 100) / 100,
       gstPercent
     };
   };
@@ -894,11 +955,11 @@ export default function SimpleBilling() {
                           <div className="flex items-center gap-2">
                             <div className="text-right">
                             <span className="text-sm font-semibold text-green-600">
-                                {formatCurrency(calculateBillTotal(bill))}
+                                {formatCurrency(bill.totalAmount || calculateBillTotal(bill))}
                             </span>
-                              {isBillPending(bill) && (
+                              {(bill.remainingAmount || 0) > 0 && (
                                 <p className="text-xs text-red-600 font-medium">
-                                  Pending: {formatCurrency(calculatePendingAmount(bill))}
+                                  Pending: {formatCurrency(bill.remainingAmount || 0)}
                                 </p>
                               )}
                             </div>
@@ -982,10 +1043,10 @@ export default function SimpleBilling() {
                         </div>
                         <div className="flex items-center gap-3">
                           <div className="text-right">
-                            <p className="font-medium">{formatCurrency(calculateBillTotal(bill))}</p>
-                            {isBillPending(bill) && (
+                            <p className="font-medium">{formatCurrency(bill.totalAmount || calculateBillTotal(bill))}</p>
+                            {(bill.remainingAmount || 0) > 0 && (
                               <p className="text-sm text-red-600 font-medium">
-                                Pending: {formatCurrency(calculatePendingAmount(bill))}
+                                Pending: {formatCurrency(bill.remainingAmount || 0)}
                               </p>
                             )}
                             <p className="text-sm text-muted-foreground">
@@ -1100,10 +1161,10 @@ export default function SimpleBilling() {
                       </div>
                       <div className="flex items-center gap-3">
                       <div className="text-right">
-                          <p className="font-medium">₹{calculateBillTotal(bill).toLocaleString()}</p>
-                          {isBillPending(bill) && (
+                          <p className="font-medium">{formatCurrency(bill.totalAmount || calculateBillTotal(bill))}</p>
+                          {(bill.remainingAmount || 0) > 0 && (
                             <p className="text-sm text-red-600 font-medium">
-                              Pending: ₹{calculatePendingAmount(bill).toLocaleString()}
+                              Pending: {formatCurrency(bill.remainingAmount || 0)}
                             </p>
                           )}
                         <p className="text-sm text-muted-foreground">

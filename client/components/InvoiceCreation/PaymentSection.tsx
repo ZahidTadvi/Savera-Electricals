@@ -140,9 +140,10 @@ export default function PaymentSection({
   let actualTotalAmount = 0;
   
   if (billingType === "gst") {
-    // Calculate total amount from items (entered prices are total including GST)
+    // Calculate total amount from items (entered price is GST-inclusive per item.total)
     const totalFromItems = items.reduce((sum, item) => {
-      return sum + (item.price * item.quantity);
+      const gross = (typeof item.total === 'number') ? item.total : (item.price * item.quantity);
+      return sum + gross;
     }, 0);
     
     // Reverse calculate GST
@@ -229,16 +230,14 @@ export default function PaymentSection({
     return timeSinceLastSave < 5000; // 5 second cooldown
   };
 
-  // Update final amount when subtotal changes
+  // Keep finalAmount/paidAmount in sync with computed totals (from items)
   useEffect(() => {
-    const newTaxRate = getTaxRate();
-    const newTotal = subtotal + (billingType === "gst" ? (subtotal * newTaxRate) / 100 : 0);
     setPaymentData(prev => ({
       ...prev,
-      finalAmount: newTotal,
-      paidAmount: prev.paymentType === "Full" ? newTotal : prev.paidAmount
+      finalAmount: totalAmount,
+      paidAmount: prev.paymentType === "Full" ? totalAmount : prev.paidAmount
     }));
-  }, [subtotal, billingType, customerData?.state, customerData?.igst, companyInfo?.address?.state]);
+  }, [totalAmount]);
 
   // Clear cooldown when it expires
   useEffect(() => {

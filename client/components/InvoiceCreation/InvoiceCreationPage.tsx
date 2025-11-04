@@ -99,31 +99,18 @@ export default function InvoiceCreationPage({ customerName, customerData, onBack
           return item;
         }
         
-        // New GST method: entered price = total including GST
-        if (selectedBillingType === "gst" && item.gstPercent > 0) {
-          const totalEnteredPrice = item.price * quantity; // Total including GST
-          const baseTotal = totalEnteredPrice / (1 + item.gstPercent / 100); // Reverse calculate base amount
-          const gstAmount = totalEnteredPrice - baseTotal; // Calculate GST amount
-          const total = baseTotal; // Store base amount (after removing GST)
-          
-          return {
-            ...item,
-            quantity,
-            total: total,
-            gstAmount: gstAmount,
-          };
-        } else {
-          // NON-GST or no GST: price is the actual price
-          const baseTotal = item.price * quantity;
-          const total = baseTotal;
-          
-          return {
-            ...item,
-            quantity,
-            total: total,
-            gstAmount: 0,
-          };
-        }
+        // Entered price is GST-inclusive; reverse-calc per-item
+        const gstPercent = item.gstPercent || (selectedBillingType === "gst" ? (companyInfo?.defaultGstRate || 18) : 0);
+        const grossUnit = item.price;
+        const baseUnit = gstPercent > 0 ? grossUnit / (1 + gstPercent / 100) : grossUnit;
+        const gstUnit = gstPercent > 0 ? (grossUnit - baseUnit) : 0;
+        return {
+          ...item,
+          quantity,
+          total: grossUnit * quantity,
+          gstAmount: gstUnit * quantity,
+          gstPercent,
+        };
       }
       return item;
     });
@@ -434,19 +421,11 @@ export default function InvoiceCreationPage({ customerName, customerData, onBack
       const gstPercent = (selectedBillingType === "gst") ? manualProduct.gstPercent : 0;
       let basePrice, baseTotal, gstAmount, total;
       
-      if (selectedBillingType === "gst" && gstPercent > 0) {
-        // Reverse calculate: if total = base + (base * gst%), then base = total / (1 + gst%/100)
-        basePrice = manualProduct.price / (1 + gstPercent / 100);
-        baseTotal = basePrice * manualProduct.quantity;
-        gstAmount = baseTotal * (gstPercent / 100);
-        total = manualProduct.price * manualProduct.quantity; // This is the entered total
-      } else {
-        // For non-GST bills, the entered price is the base price
-        basePrice = manualProduct.price;
-        baseTotal = basePrice * manualProduct.quantity;
-        gstAmount = 0;
-        total = baseTotal;
-      }
+      // Entered price is GST-inclusive; reverse-calc
+      basePrice = manualProduct.price / (1 + (gstPercent || 0) / 100);
+      baseTotal = basePrice * manualProduct.quantity;
+      gstAmount = (manualProduct.price - basePrice) * manualProduct.quantity;
+      total = manualProduct.price * manualProduct.quantity;
       
       console.log('🔍 Manual product addition debug:', {
         manualProduct: manualProduct,
@@ -481,10 +460,10 @@ export default function InvoiceCreationPage({ customerName, customerData, onBack
           id: `manual-${Date.now()}`,
           name: manualProduct.name.trim(),
           description: "Manual product entry",
-          price: manualProduct.price, // Use the entered price (total amount including GST)
-          basePrice: basePrice, // Store the calculated base price
+          price: manualProduct.price,
+          basePrice: basePrice,
           quantity: manualProduct.quantity,
-          total: baseTotal, // Show the base amount (after removing GST)
+          total: total,
           gstPercent: gstPercent,
           gstAmount: gstAmount,
         };
@@ -552,30 +531,21 @@ export default function InvoiceCreationPage({ customerName, customerData, onBack
       } else {
         // For GST bills: selectedProduct.price is the total including GST, need to reverse-calculate base price
         // For NON-GST bills: selectedProduct.price is the actual price
-        const gstPercent = (selectedBillingType === "gst") ? selectedProduct.gstPercent : 0;
-        let basePrice, baseTotal, gstAmount, total;
-        
-        if (selectedBillingType === "gst" && gstPercent > 0) {
-          // New GST method: entered price = total including GST
-          total = selectedProduct.price; // This is the total including GST
-          baseTotal = total / (1 + gstPercent / 100); // Reverse calculate base amount
-          gstAmount = total - baseTotal; // Calculate GST amount
-          basePrice = baseTotal; // Base price per unit
-        } else {
-          // NON-GST or no GST: price is the actual price
-          basePrice = selectedProduct.price;
-          baseTotal = basePrice;
-          gstAmount = 0;
-          total = baseTotal;
-        }
+        // Entered price is GST-inclusive; reverse-calc
+        const gstPercent = selectedBillingType === "gst" ? (selectedProduct.gstPercent || (companyInfo?.defaultGstRate || 18)) : 0;
+        const gross = selectedProduct.price;
+        const basePrice = gstPercent > 0 ? gross / (1 + gstPercent / 100) : gross;
+        const baseTotal = basePrice;
+        const gstAmount = gstPercent > 0 ? (gross - basePrice) : 0;
+        const total = gross;
         
         const newItem = {
           id: selectedProduct.id,
           name: selectedProduct.name,
           description: selectedProduct.description || "This is a product",
-          price: selectedProduct.price, // Store the entered price (total including GST for GST bills)
+          price: selectedProduct.price,
           quantity: 1,
-          total: baseTotal, // Store the base amount (after removing GST)
+          total: total,
           gstPercent: gstPercent,
           gstAmount: gstAmount,
           stockQuantity: selectedProduct.stockQuantity, // Store stock quantity for validation
@@ -631,30 +601,21 @@ export default function InvoiceCreationPage({ customerName, customerData, onBack
       
       // For GST bills: product.price is the total including GST, need to reverse-calculate base price
       // For NON-GST bills: product.price is the actual price
-      const gstPercent = (selectedBillingType === "gst") ? product.gstPercent : 0;
-      let basePrice, baseTotal, gstAmount, total;
-      
-      if (selectedBillingType === "gst" && gstPercent > 0) {
-        // New GST method: entered price = total including GST
-        total = product.price; // This is the total including GST
-        baseTotal = total / (1 + gstPercent / 100); // Reverse calculate base amount
-        gstAmount = total - baseTotal; // Calculate GST amount
-        basePrice = baseTotal; // Base price per unit
-      } else {
-        // NON-GST or no GST: price is the actual price
-        basePrice = product.price;
-        baseTotal = basePrice;
-        gstAmount = 0;
-        total = baseTotal;
-      }
+      // Entered price is GST-inclusive; reverse-calc
+      const gstPercent = selectedBillingType === "gst" ? (product.gstPercent || (companyInfo?.defaultGstRate || 18)) : 0;
+      const gross = product.price;
+      const basePrice = gstPercent > 0 ? gross / (1 + gstPercent / 100) : gross;
+      const baseTotal = basePrice;
+      const gstAmount = gstPercent > 0 ? (gross - basePrice) : 0;
+      const total = gross;
       
       const newItem = {
         id: product.id,
         name: product.name,
         description: product.description || "This is a product",
-        price: product.price, // Store the entered price (total including GST for GST bills)
+        price: product.price,
         quantity: 1,
-        total: baseTotal, // Store the base amount (after removing GST)
+        total: total,
         gstPercent: gstPercent,
         gstAmount: gstAmount,
         stockQuantity: product.stockQuantity, // Store stock quantity for validation
@@ -675,27 +636,18 @@ export default function InvoiceCreationPage({ customerName, customerData, onBack
     if (price < 0) return;
     const updatedItems = items.map(item => {
       if (item.id === itemId) {
-        // New GST method: entered price = total including GST
-        if (selectedBillingType === "gst" && item.gstPercent > 0) {
-          const totalEnteredPrice = price * item.quantity; // Total including GST
-          const baseTotal = totalEnteredPrice / (1 + item.gstPercent / 100); // Reverse calculate base amount
-          const gstAmount = totalEnteredPrice - baseTotal; // Calculate GST amount
-          return {
-            ...item,
-            price,
-            total: baseTotal, // Store base amount (after removing GST)
-            gstAmount: gstAmount,
-          };
-        } else {
-          // NON-GST or no GST: price is the actual price
-          const baseTotal = price * item.quantity;
-          return {
-            ...item,
-            price,
-            total: baseTotal,
-            gstAmount: 0,
-          };
-        }
+        // Entered price is GST-inclusive; reverse-calc
+        const gstPercent = item.gstPercent || (selectedBillingType === "gst" ? (companyInfo?.defaultGstRate || 18) : 0);
+        const grossUnit = price;
+        const baseUnit = gstPercent > 0 ? grossUnit / (1 + gstPercent / 100) : grossUnit;
+        const gstUnit = gstPercent > 0 ? (grossUnit - baseUnit) : 0;
+        return {
+          ...item,
+          price,
+          total: grossUnit * item.quantity,
+          gstAmount: gstUnit * item.quantity,
+          gstPercent,
+        };
       }
       return item;
     });
