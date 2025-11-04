@@ -108,11 +108,12 @@ export default function ItemManagement({
       return;
     }
     
-    const basePrice = selectedProduct.price;
-    // For same state: use product GST, for interstate: no individual GST (IGST applied to subtotal)
-    const gstPercent = billingType === "gst" ? selectedProduct.gstPercent : 0;
-    const gstAmount = gstPercent ? (basePrice * gstPercent) / 100 : 0;
-    const total = basePrice + gstAmount;
+    // Entered price is GST-inclusive; reverse-calculate base and GST
+    const gstPercent = billingType === "gst" ? (selectedProduct.gstPercent || (companyInfo?.defaultGstRate || 18)) : 0;
+    const gross = selectedProduct.price;
+    const basePrice = gstPercent > 0 ? gross / (1 + gstPercent / 100) : gross;
+    const gstAmount = gstPercent > 0 ? (gross - basePrice) : 0;
+    const total = gross;
 
     const newItem: InvoiceItem = {
       id: `item-${Date.now()}`,
@@ -143,11 +144,12 @@ export default function ItemManagement({
       return;
     }
 
-    const basePrice = product.price;
-    // For same state: use product GST, for interstate: no individual GST (IGST applied to subtotal)
-    const gstPercent = billingType === "gst" ? product.gstPercent : 0;
-    const gstAmount = gstPercent ? (basePrice * gstPercent) / 100 : 0;
-    const total = basePrice + gstAmount;
+    // Entered price is GST-inclusive; reverse-calculate base and GST
+    const gstPercent = billingType === "gst" ? (product.gstPercent || (companyInfo?.defaultGstRate || 18)) : 0;
+    const gross = product.price;
+    const basePrice = gstPercent > 0 ? gross / (1 + gstPercent / 100) : gross;
+    const gstAmount = gstPercent > 0 ? (gross - basePrice) : 0;
+    const total = gross;
 
     const newItem: InvoiceItem = {
       id: `item-${Date.now()}`,
@@ -181,13 +183,17 @@ export default function ItemManagement({
             return item; // Return unchanged item
           }
           
+          // price stored is gross unit price; reverse-calc per-item
+          const gross = item.price;
+          const gstPercent = item.gstPercent || (billingType === "gst" ? (companyInfo?.defaultGstRate || 18) : 0);
+          const baseUnit = gstPercent > 0 ? gross / (1 + gstPercent / 100) : gross;
+          const gstUnit = gstPercent > 0 ? (gross - baseUnit) : 0;
           return {
             ...item,
             quantity,
-            gstAmount: billingType === "gst" ? (item.price * quantity * item.gstPercent) / 100 : 0,
-            total:
-              item.price * quantity +
-              (billingType === "gst" ? (item.price * quantity * item.gstPercent) / 100 : 0),
+            gstAmount: gstUnit * quantity,
+            total: gross * quantity,
+            gstPercent,
           };
         }
         return item;
@@ -200,15 +206,20 @@ export default function ItemManagement({
     
     setItems(prev => prev.map(item => {
       if (item.id === itemId) {
-        const baseTotal = price * item.quantity;
-        const gstAmount = billingType === "gst" ? (baseTotal * item.gstPercent) / 100 : 0;
-        const total = baseTotal + gstAmount;
+        // price entered is gross unit price; reverse-calc
+        const gstPercent = item.gstPercent || (billingType === "gst" ? (companyInfo?.defaultGstRate || 18) : 0);
+        const grossUnit = price;
+        const baseUnit = gstPercent > 0 ? grossUnit / (1 + gstPercent / 100) : grossUnit;
+        const gstUnit = gstPercent > 0 ? (grossUnit - baseUnit) : 0;
+        const total = grossUnit * item.quantity;
+        const gstAmount = gstUnit * item.quantity;
         
         return {
           ...item,
           price,
           total: total,
           gstAmount: gstAmount,
+          gstPercent,
         };
       }
       return item;
@@ -229,11 +240,14 @@ export default function ItemManagement({
     return companyInfo?.defaultGstRate || 18; // Use company's default GST rate
   };
 
-  const subtotal = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  const gstTotal =
-    billingType === "gst"
-      ? items.reduce((sum, i) => sum + (i.gstAmount || 0), 0)
-      : 0;
+  // Subtotal must be base (exclusive) even if price input holds gross
+  const subtotal = items.reduce((sum, i) => {
+    const gross = (i.price * i.quantity);
+    const gst = i.gstAmount || 0;
+    const base = Math.max(0, gross - gst);
+    return sum + base;
+  }, 0);
+  const gstTotal = items.reduce((sum, i) => sum + (i.gstAmount || 0), 0);
   const grandTotal = subtotal + gstTotal;
 
   return (
